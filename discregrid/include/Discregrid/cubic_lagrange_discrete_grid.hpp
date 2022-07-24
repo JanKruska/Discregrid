@@ -1,7 +1,7 @@
 #pragma once
 
 #include "discrete_grid.hpp"
-
+#include "list"
 namespace Discregrid
 {
 
@@ -18,7 +18,8 @@ public:
 
 	unsigned int addFunction(ContinuousFunction const& func, bool verbose = false,
 		SamplePredicate const& pred = nullptr) override;
-
+	unsigned int addFunction(std::list<std::pair<Eigen::Vector3d,double*>>& locs, bool verbose = false,
+									   SamplePredicate const& pred = nullptr);
 
 	std::size_t nCells() const { return m_n_cells; };
 	double interpolate(unsigned int field_id, Eigen::Vector3d const& xi,

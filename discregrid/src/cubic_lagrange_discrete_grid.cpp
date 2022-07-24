@@ -898,6 +898,127 @@ CubicLagrangeDiscreteGrid::addFunction(ContinuousFunction const &func, bool verb
 	return static_cast<unsigned int>(m_n_fields++);
 }
 
+unsigned int
+CubicLagrangeDiscreteGrid::addFunction(std::list<std::pair<Eigen::Vector3d,double*>>& locs, bool verbose,
+									   SamplePredicate const &pred)
+{
+	using namespace std::chrono;
+
+	auto t0_construction = high_resolution_clock::now();
+
+	auto n = Matrix<unsigned int, 3, 1>::Map(m_resolution.data());
+
+	auto nv = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
+	auto ne_x = (n[0] + 0) * (n[1] + 1) * (n[2] + 1);
+	auto ne_y = (n[0] + 1) * (n[1] + 0) * (n[2] + 1);
+	auto ne_z = (n[0] + 1) * (n[1] + 1) * (n[2] + 0);
+	auto ne = ne_x + ne_y + ne_z;
+
+	auto n_nodes = nv + 2 * ne;
+
+	m_nodes.push_back({});
+	auto &coeffs = m_nodes.back();
+	coeffs.resize(n_nodes);
+
+	std::atomic_uint counter(0u);
+	SpinLock mutex;
+	auto t0 = high_resolution_clock::now();
+
+// #pragma omp parallel default(shared)
+	// {
+// #pragma omp for schedule(static) nowait
+		for (int l = 0; l < static_cast<int>(n_nodes); ++l)
+		{
+			auto x = indexToNodePosition(l);
+			auto &c = coeffs[l];
+
+			if (!pred || pred(x))
+				locs.emplace_back(x,&coeffs[l]);
+			else
+				coeffs[l] = std::numeric_limits<double>::max();
+
+			if (verbose && (++counter == n_nodes || duration_cast<milliseconds>(high_resolution_clock::now() - t0).count() > 1000u))
+			{
+				std::async(std::launch::async, [&]() {
+					mutex.lock();
+					t0 = high_resolution_clock::now();
+					std::cout << "\r"
+							  << "Construction " << std::setw(20)
+							  << 100.0 * static_cast<double>(counter) / static_cast<double>(n_nodes) << "%";
+					mutex.unlock();
+				});
+			}
+		}
+	// }
+
+	m_cells.push_back({});
+	auto &cells = m_cells.back();
+	cells.resize(m_n_cells);
+	for (auto l = 0u; l < m_n_cells; ++l)
+	{
+		auto k = l / (n[1] * n[0]);
+		auto temp = l % (n[1] * n[0]);
+		auto j = temp / n[0];
+		auto i = temp % n[0];
+
+		auto nx = n[0];
+		auto ny = n[1];
+		auto nz = n[2];
+
+		auto &cell = cells[l];
+		cell[0] = (nx + 1) * (ny + 1) * k + (nx + 1) * j + i;
+		cell[1] = (nx + 1) * (ny + 1) * k + (nx + 1) * j + i + 1;
+		cell[2] = (nx + 1) * (ny + 1) * k + (nx + 1) * (j + 1) + i;
+		cell[3] = (nx + 1) * (ny + 1) * k + (nx + 1) * (j + 1) + i + 1;
+		cell[4] = (nx + 1) * (ny + 1) * (k + 1) + (nx + 1) * j + i;
+		cell[5] = (nx + 1) * (ny + 1) * (k + 1) + (nx + 1) * j + i + 1;
+		cell[6] = (nx + 1) * (ny + 1) * (k + 1) + (nx + 1) * (j + 1) + i;
+		cell[7] = (nx + 1) * (ny + 1) * (k + 1) + (nx + 1) * (j + 1) + i + 1;
+
+		auto offset = nv;
+		cell[8] = offset + 2 * (nx * (ny + 1) * k + nx * j + i);
+		cell[9] = cell[8] + 1;
+		cell[10] = offset + 2 * (nx * (ny + 1) * (k + 1) + nx * j + i);
+		cell[11] = cell[10] + 1;
+		cell[12] = offset + 2 * (nx * (ny + 1) * k + nx * (j + 1) + i);
+		cell[13] = cell[12] + 1;
+		cell[14] = offset + 2 * (nx * (ny + 1) * (k + 1) + nx * (j + 1) + i);
+		cell[15] = cell[14] + 1;
+
+		offset += 2 * ne_x;
+		cell[16] = offset + 2 * (ny * (nz + 1) * i + ny * k + j);
+		cell[17] = cell[16] + 1;
+		cell[18] = offset + 2 * (ny * (nz + 1) * (i + 1) + ny * k + j);
+		cell[19] = cell[18] + 1;
+		cell[20] = offset + 2 * (ny * (nz + 1) * i + ny * (k + 1) + j);
+		cell[21] = cell[20] + 1;
+		cell[22] = offset + 2 * (ny * (nz + 1) * (i + 1) + ny * (k + 1) + j);
+		cell[23] = cell[22] + 1;
+
+		offset += 2 * ne_y;
+		cell[24] = offset + 2 * (nz * (nx + 1) * j + nz * i + k);
+		cell[25] = cell[24] + 1;
+		cell[26] = offset + 2 * (nz * (nx + 1) * (j + 1) + nz * i + k);
+		cell[27] = cell[26] + 1;
+		cell[28] = offset + 2 * (nz * (nx + 1) * j + nz * (i + 1) + k);
+		cell[29] = cell[28] + 1;
+		cell[30] = offset + 2 * (nz * (nx + 1) * (j + 1) + nz * (i + 1) + k);
+		cell[31] = cell[30] + 1;
+	}
+
+	m_cell_map.push_back({});
+	auto &cell_map = m_cell_map.back();
+	cell_map.resize(m_n_cells);
+	std::iota(cell_map.begin(), cell_map.end(), 0u);
+
+	if (verbose)
+	{
+		std::cout << "\rConstruction took " << std::setw(15) << static_cast<double>(duration_cast<milliseconds>(high_resolution_clock::now() - t0_construction).count()) / 1000.0 << "s" << std::endl;
+	}
+
+	return static_cast<unsigned int>(m_n_fields++);
+}
+
 bool
 CubicLagrangeDiscreteGrid::determineShapeFunctions(unsigned int field_id, Eigen::Vector3d const &x,
 	std::array<unsigned int, 32> &cell, Eigen::Vector3d &c0, Eigen::Matrix<double, 32, 1> &N,
