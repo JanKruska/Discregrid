@@ -1,7 +1,7 @@
 #pragma once
 
 #include "discrete_grid.hpp"
-#include "list"
+
 namespace Discregrid
 {
 
