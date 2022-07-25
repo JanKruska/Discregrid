@@ -899,7 +899,7 @@ CubicLagrangeDiscreteGrid::addFunction(ContinuousFunction const &func, bool verb
 }
 
 unsigned int
-CubicLagrangeDiscreteGrid::addFunction(std::list<std::pair<Eigen::Vector3d,double*>>& locs, bool verbose,
+CubicLagrangeDiscreteGrid::addFunction(std::vector<std::pair<Eigen::Vector3d,double*>>& locs, bool verbose,
 									   SamplePredicate const &pred)
 {
 	using namespace std::chrono;
